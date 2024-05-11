@@ -20,3 +20,9 @@ void putChar(char ch) {
 	outByte(SERIAL_PORT, ch);
 }
 
+void putStr(char *ch){
+	while(ch && (*ch) && (*ch)!='\0'){
+		putChar(*ch);
+		ch++;
+	}
+}

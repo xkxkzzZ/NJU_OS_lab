@@ -16,6 +16,7 @@ kmain.bin: $(KOBJS)
 	$(LD) $(LDFLAGS) -e kEntry -Ttext 0x00100000 -o kMain.elf $(KOBJS)
 	@#objcopy -S -j .text -j .rodata -j .eh_frame -j .data -j .bss -O binary kMain.elf kMain.bin
 	@#objcopy -O binary kMain.elf kMain.bin
+	chmod +x ../utils/genKernel.pl
 	@../utils/genKernel.pl kMain.elf
 	@#../utils/genKernel.pl kMain.bin
 	

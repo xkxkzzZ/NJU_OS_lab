@@ -256,17 +256,17 @@ int str2Str(char *string, char *buffer, int size, int count)
 pid_t fork()
 {
 	// TODO:call syscall
-	return 0;
+	return syscall(SYS_FORK, 0, 0, 0, 0, 0);
 }
 
 int sleep(uint32_t time)
 {
 	// TODO:call syscall
-	return 0;
+	return syscall(SYS_SLEEP, time, 0, 0, 0, 0);
 }
 
 int exit()
 {
 	// TODO:call syscall
-	return 0;
+	return syscall(SYS_EXIT, 0, 0, 0, 0, 0);
 }
