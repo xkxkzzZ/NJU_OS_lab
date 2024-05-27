@@ -8,7 +8,7 @@
 #define SYS_SLEEP 4
 #define SYS_EXIT 5
 #define SYS_SEM 6
-
+#define SYS_PID 7
 #define STD_OUT 0
 #define STD_IN 1
 
@@ -53,6 +53,7 @@ void syscallSemInit(struct StackFrame *sf);
 void syscallSemWait(struct StackFrame *sf);
 void syscallSemPost(struct StackFrame *sf);
 void syscallSemDestroy(struct StackFrame *sf);
+void syscallPid(struct StackFrame *sf);
 
 void irqHandle(struct StackFrame *sf) { // pointer sf = esp
 	/* Reassign segment register */
@@ -140,17 +141,55 @@ void timerHandle(struct StackFrame *sf) {
 	}
 }
 
+#define DEV 0
+#define SEM 1
+void process_into_block(int choice, int current, int i){
+	if(choice == SEM){
+		pcb[current].blocked.next = sem[i].pcb.next;
+		pcb[current].blocked.prev = &(sem[i].pcb);
+		sem[i].pcb.next = &(pcb[current].blocked);
+		(pcb[current].blocked.next)->prev = &(pcb[current].blocked);
+	}
+	else{
+		pcb[current].blocked.next = dev[i].pcb.next;
+		pcb[current].blocked.prev = &(dev[i].pcb);
+		dev[i].pcb.next = &(pcb[current].blocked);
+		(pcb[current].blocked.next)->prev = &(pcb[current].blocked);
+	}
+}
+ProcessTable* process_out_block(int choice, int i){
+	ProcessTable *pt = NULL;
+	if(choice == SEM){
+		pt = (ProcessTable*)((uint32_t)(sem[i].pcb.prev) -
+				(uint32_t)&(((ProcessTable*)0)->blocked));
+		sem[i].pcb.prev = (sem[i].pcb.prev)->prev;
+		(sem[i].pcb.prev)->next = &(sem[i].pcb);
+	}
+	else{
+		pt = (ProcessTable*)((uint32_t)(dev[i].pcb.prev) -
+				(uint32_t)&(((ProcessTable*)0)->blocked));
+		dev[i].pcb.prev = (dev[i].pcb.prev)->prev;
+		(dev[i].pcb.prev)->next = &(dev[i].pcb);
+	}
+	return pt;
+}
+
+
 void keyboardHandle(struct StackFrame *sf) {
 	ProcessTable *pt = NULL;
 	uint32_t keyCode = getKeyCode();
 	if (keyCode == 0) // illegal keyCode
 		return;
-	//putChar(getChar(keyCode));
+	// putChar(getChar(keyCode));
 	keyBuffer[bufferTail] = keyCode;
 	bufferTail=(bufferTail+1)%MAX_KEYBUFFER_SIZE;
 
 	if (dev[STD_IN].value < 0) { // with process blocked
 		// TODO: deal with blocked situation
+		dev[STD_IN].value ++;
+		pt = process_out_block(DEV, STD_IN);
+		pt->state = STATE_RUNNABLE;
+		pt->sleepTime = 0;
 	}
 
 	return;
@@ -179,6 +218,9 @@ void syscallHandle(struct StackFrame *sf) {
 		case SYS_SEM:
 			syscallSem(sf);
 			break; // for SYS_SEM
+		case SYS_PID:
+			syscallPid(sf);
+			break; // for SYS_PID
 		default:break;
 	}
 }
@@ -247,6 +289,34 @@ void syscallRead(struct StackFrame *sf) {
 
 void syscallReadStdIn(struct StackFrame *sf) {
 	// TODO: complete `stdin`
+	if(dev[STD_IN].value == 0){
+		dev[STD_IN].value --;
+		process_into_block(DEV, current, STD_IN);
+		pcb[current].state = STATE_BLOCKED;
+		pcb[current].sleepTime = -1;
+		asm volatile("int $0x20");
+		int sel = sf->ds;
+		char *str = (char *)sf->edx;
+		int size = sf->ebx;
+		int i = 0;
+		char character = 0;
+		asm volatile("movw %0, %%es"::"m"(sel));
+		while(i < size-1) {
+			if(bufferHead == bufferTail) break;
+			character=getChar(keyBuffer[bufferHead]);
+			bufferHead=(bufferHead+1)%MAX_KEYBUFFER_SIZE;
+			putChar(character);
+			if(character != 0) {
+				asm volatile("movb %0, %%es:(%1)"::"r"(character),"r"(str+i));
+				i++;
+			}
+		}
+		asm volatile("movb $0, %%es:(%0)"::"r"(str+i));
+		pcb[current].regs.eax = i;
+	}
+	else if (dev[STD_IN].value < 0) {
+		pcb[current].regs.eax = -1;
+	}
 }
 
 void syscallFork(struct StackFrame *sf) {
@@ -347,11 +417,38 @@ void syscallSem(struct StackFrame *sf) {
 
 void syscallSemInit(struct StackFrame *sf) {
 	// TODO: complete `SemInit`
+	int i = 0;
+	for(i = 0; i < MAX_SEM_NUM; i++){
+		if(sem[i].state == 0){
+			sem[i].state = 1;
+			sem[i].value = sf->edx;
+			sem[i].pcb.next = &(sem[i].pcb);
+			sem[i].pcb.prev = &(sem[i].pcb);
+			pcb[current].regs.eax = i;
+			return;
+		}
+	}
+	pcb[current].regs.eax = -1;
 	return;
 }
 
 void syscallSemWait(struct StackFrame *sf) {
 	// TODO: complete `SemWait` and note that you need to consider some special situations
+	int i = (int)sf->edx;
+	if (sem[i].state == 1) {
+		pcb[current].regs.eax = 0;
+		sem[i].value --;
+		if (sem[i].value < 0) {
+			pcb[current].state = STATE_BLOCKED;
+			process_into_block(SEM, current, i);
+			asm volatile("int $0x20");
+		}
+		return;
+	}
+	else {
+		pcb[current].regs.eax = -1;
+		return;
+	}
 }
 
 void syscallSemPost(struct StackFrame *sf) {
@@ -362,9 +459,37 @@ void syscallSemPost(struct StackFrame *sf) {
 		return;
 	}
 	// TODO: complete other situations
+	if (sem[i].state == 1) {
+		pcb[current].regs.eax = 0;
+		sem[i].value ++;
+		if (sem[i].value <= 0) {
+			pt = process_out_block(SEM, i);
+			pt->state = STATE_RUNNABLE;
+			pt->sleepTime = 0;
+		}
+		return;
+	}
+	else {
+		pcb[current].regs.eax = -1;
+		return;
+	}
 }
 
 void syscallSemDestroy(struct StackFrame *sf) {
 	// TODO: complete `SemDestroy`
+	int i = (int)sf->edx;
+	if (sem[i].state == 1) {
+		pcb[current].regs.eax = 0;
+		sem[i].state = 0;
+		asm volatile("int $0x20");
+	}
+	else {
+		pcb[current].regs.eax = -1;
+	}
+	return;
+}
+
+void syscallPid(struct StackFrame *sf) {
+	pcb[current].regs.eax = current;
 	return;
 }

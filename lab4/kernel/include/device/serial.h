@@ -3,5 +3,7 @@
 
 void initSerial(void);
 void putChar(char);
+void putStr(char *);
+void putNum(int);
 
 #endif

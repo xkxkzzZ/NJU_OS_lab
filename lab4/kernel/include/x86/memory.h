@@ -15,7 +15,7 @@
 #define STS_TG32    0xF         // 32-bit Trap Gate
 
 // GDT entries
-#define NR_SEGMENTS      10           // GDT size
+#define NR_SEGMENTS      20           // GDT size
 #define SEG_KCODE   1           // Kernel code
 #define SEG_KDATA   2           // Kernel data/stack
 #define SEG_TSS     (NR_SEGMENTS-1)
@@ -47,7 +47,7 @@ struct ListHead {
 	struct ListHead *prev;
 };
 
-#define MAX_SEM_NUM 4
+#define MAX_SEM_NUM 8
 
 struct Semaphore {
 	int state;

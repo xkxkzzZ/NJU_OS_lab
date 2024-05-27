@@ -592,3 +592,7 @@ int sem_post(sem_t *sem) {
 int sem_destroy(sem_t *sem) {
 	return syscall(SYS_SEM, SEM_DESTROY, *sem, 0, 0, 0);
 }
+
+pid_t getpid() {
+	return syscall(SYS_PID, 0, 0, 0, 0, 0);
+}
